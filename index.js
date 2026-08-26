@@ -87,7 +87,10 @@ function startRestPolling() {
 }
 
 function startBinance() {
-  return startBinanceTopWs((marketType, items) => setBlock('Binance', marketType, items));
+  return startBinanceTopWs(
+    (marketType, items) => setBlock('Binance', marketType, items),
+    (marketType, message) => setBlockError('Binance', marketType, message),
+  );
 }
 
 let sheets;
