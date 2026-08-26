@@ -3,7 +3,7 @@
 const express = require('express');
 const { buildLayout, buildStaticRequests, buildValueUpdates } = require('./lib/layout');
 const { createSheetsClient, getOrCreateSheetId, clearSheetFormatting, applyBatchUpdate, applyValueUpdates } = require('./lib/sheetsClient');
-const { fetchWhiteBit, fetchBybit, fetchOkx, startBinanceWs } = require('./lib/exchanges');
+const { fetchWhiteBit, fetchBybit, fetchOkx, startBinanceTopWs } = require('./lib/exchanges');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = process.env.SHEET_NAME || 'LiquidityTop';
@@ -81,12 +81,13 @@ async function pollOkx() {
 
 function startRestPolling() {
   const tick = () => { pollWhiteBit(); pollBybit(); pollOkx(); };
-  tick();
+  const firstTick = Promise.allSettled([pollWhiteBit(), pollBybit(), pollOkx()]);
   setInterval(tick, REST_POLL_MS);
+  return firstTick;
 }
 
 function startBinance() {
-  startBinanceWs((marketType, items) => setBlock('Binance', marketType, items));
+  return startBinanceTopWs((marketType, items) => setBlock('Binance', marketType, items));
 }
 
 let sheets;
@@ -145,8 +146,8 @@ function startSelfPing() {
   await initSheet();
   startHealthServer();
   startSelfPing();
-  startBinance();
-  startRestPolling();
+  await Promise.all([startRestPolling(), startBinance()]);
+  await pushToSheet();
   setInterval(pushToSheet, SHEET_WRITE_MS);
 })().catch(err => {
   console.error('Fatal startup error:', err);
