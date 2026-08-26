@@ -7,16 +7,14 @@ const { fetchWhiteBit, fetchBybit, fetchOkx, startBinanceWs } = require('./lib/e
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = process.env.SHEET_NAME || 'LiquidityTop';
-const REST_POLL_MS = Number(process.env.REST_POLL_MS || 15000);   // WhiteBIT/Bybit/OKX
-const SHEET_WRITE_MS = Number(process.env.SHEET_WRITE_MS || 30000); // как часто пишем в таблицу
+const REST_POLL_MS = Number(process.env.REST_POLL_MS || 15000);
+const SHEET_WRITE_MS = Number(process.env.SHEET_WRITE_MS || 30000);
 const PORT = process.env.PORT || 3000;
 
 if (!SPREADSHEET_ID) {
   console.error('SPREADSHEET_ID env var is required');
   process.exit(1);
 }
-
-// ==================== СОСТОЯНИЕ (в памяти) ====================
 
 const state = {
   WhiteBIT: { Spot: [], Futures: [], TradeFi: [] },
@@ -25,7 +23,7 @@ const state = {
   OKX: { Spot: [], Futures: [] },
 };
 
-let lastUpdateAt = {}; // exchange -> timestamp последнего успешного обновления
+let lastUpdateAt = {};
 
 function setBlock(exchange, type, items) {
   state[exchange][type] = items;
@@ -33,12 +31,15 @@ function setBlock(exchange, type, items) {
 }
 
 function setBlockError(exchange, type, message) {
+  const prev = state[exchange][type];
+  if (Array.isArray(prev) && !prev.__error && prev.length > 0) {
+    prev.__staleError = message;
+    return;
+  }
   const arr = [];
   arr.__error = message;
   state[exchange][type] = arr;
 }
-
-// ==================== REST-ПОЛЛИНГ (WhiteBIT / Bybit / OKX) ====================
 
 async function pollWhiteBit() {
   try {
@@ -80,17 +81,13 @@ async function pollOkx() {
 
 function startRestPolling() {
   const tick = () => { pollWhiteBit(); pollBybit(); pollOkx(); };
-  tick(); // сразу первый снимок, не дожидаясь первого интервала
+  tick();
   setInterval(tick, REST_POLL_MS);
 }
-
-// ==================== BINANCE WS ====================
 
 function startBinance() {
   startBinanceWs((marketType, items) => setBlock('Binance', marketType, items));
 }
-
-// ==================== ЗАПИСЬ В GOOGLE SHEETS ====================
 
 let sheets;
 let layout;
@@ -106,8 +103,6 @@ async function initSheet() {
     const staticRequests = buildStaticRequests(sheetId, layout);
     await applyBatchUpdate(sheets, SPREADSHEET_ID, staticRequests);
   } catch (err) {
-    // Например, группы колонок уже существуют с прошлого деплоя —
-    // не критично, значения всё равно обновятся дальше.
     console.warn('[Sheets] static layout build had issues (probably fine on redeploy):', err.message);
   }
 
@@ -125,8 +120,6 @@ async function pushToSheet() {
   }
 }
 
-// ==================== HEALTH-СЕРВЕР (нужен, чтобы Render не считал сервис мёртвым) ====================
-
 function startHealthServer() {
   const app = express();
   app.get('/', (req, res) => {
@@ -136,11 +129,6 @@ function startHealthServer() {
   app.listen(PORT, () => console.log(`Health server listening on ${PORT}`));
 }
 
-// Render (бесплатный тариф) усыпляет Web Service после 15 минут без
-// входящих HTTP-запросов — а у нас весь трафик исходящий (WS к Binance,
-// поллинг бирж), входящих никто не делает. Чтобы не заводить внешний
-// cron, сервис пингует сам себя: Render автоматически прокидывает
-// RENDER_EXTERNAL_URL с публичным адресом сервиса.
 function startSelfPing() {
   const externalUrl = process.env.RENDER_EXTERNAL_URL;
   if (!externalUrl) {
@@ -150,10 +138,8 @@ function startSelfPing() {
   const url = externalUrl.replace(/\/$/, '') + '/health';
   setInterval(() => {
     fetch(url).then(() => console.log('[self-ping] ok')).catch(err => console.warn('[self-ping] failed:', err.message));
-  }, 10 * 60 * 1000); // каждые 10 минут — с запасом до 15-минутного лимита
+  }, 10 * 60 * 1000);
 }
-
-// ==================== СТАРТ ====================
 
 (async () => {
   await initSheet();
