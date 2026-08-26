@@ -1,0 +1,17 @@
+{
+  "name": "liquidity-ws-service",
+  "version": "1.0.0",
+  "description": "Real-time top-by-volume tracker (WhiteBIT, Binance, Bybit, OKX) -> Google Sheets, via WS (Binance) + fast REST polling (the rest)",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^140.0.1",
+    "ws": "^8.17.0"
+  }
+}
