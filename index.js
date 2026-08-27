@@ -2,6 +2,13 @@
 
 const express = require('express');
 const { buildLayout, buildStaticRequests, buildValueUpdates } = require('./lib/layout');
+const { buildComparisonData } = require('./lib/comparison');
+const {
+  buildLayout: buildComparisonLayout,
+  buildStaticRequests: buildComparisonStaticRequests,
+  buildValueUpdates: buildComparisonValueUpdates,
+  buildRecommendationColorRequests,
+} = require('./lib/comparisonSheet');
 const { createSheetsClient, getOrCreateSheetId, clearSheetFormatting, applyBatchUpdate, applyValueUpdates } = require('./lib/sheetsClient');
 const {
   fetchWhiteBit, fetchBybit, fetchOkx,
@@ -11,6 +18,7 @@ const {
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = process.env.SHEET_NAME || 'LiquidityTop';
+const COMPARISON_SHEET_NAME = process.env.COMPARISON_SHEET_NAME || 'Сравнение';
 const REST_POLL_MS = Number(process.env.REST_POLL_MS || 15000);   // WhiteBIT/Bybit/OKX
 const SHEET_WRITE_MS = Number(process.env.SHEET_WRITE_MS || 30000); // как часто пишем в таблицу
 const PORT = process.env.PORT || 3000;
@@ -144,6 +152,8 @@ function startBinance() {
 
 let sheets;
 let layout;
+let comparisonSheetId;
+let comparisonLayout;
 
 async function initSheet() {
   sheets = createSheetsClient();
@@ -164,6 +174,20 @@ async function initSheet() {
   return sheetId;
 }
 
+async function initComparisonSheet() {
+  comparisonLayout = buildComparisonLayout();
+  comparisonSheetId = await getOrCreateSheetId(sheets, SPREADSHEET_ID, COMPARISON_SHEET_NAME);
+
+  await clearSheetFormatting(sheets, SPREADSHEET_ID, comparisonSheetId);
+
+  try {
+    const staticRequests = buildComparisonStaticRequests(comparisonSheetId, comparisonLayout);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, staticRequests);
+  } catch (err) {
+    console.warn('[Sheets] comparison sheet static layout had issues (probably fine on redeploy):', err.message);
+  }
+}
+
 async function pushToSheet() {
   try {
     const tzLabel = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Kyiv' });
@@ -172,6 +196,18 @@ async function pushToSheet() {
     console.log('[Sheets] pushed at', tzLabel);
   } catch (err) {
     console.error('[Sheets] push failed:', err.message);
+  }
+
+  try {
+    const tzLabel = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Kyiv' });
+    const comparisonData = buildComparisonData(state);
+    const compValues = buildComparisonValueUpdates(COMPARISON_SHEET_NAME, comparisonLayout, comparisonData, 'Обновлено: ' + tzLabel);
+    await applyValueUpdates(sheets, SPREADSHEET_ID, compValues);
+    const recColorRequests = buildRecommendationColorRequests(comparisonSheetId, comparisonLayout, comparisonData);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, recColorRequests);
+    console.log('[Sheets] comparison pushed at', tzLabel);
+  } catch (err) {
+    console.error('[Sheets] comparison push failed:', err.message);
   }
 }
 
@@ -207,6 +243,7 @@ function startSelfPing() {
 
 (async () => {
   await initSheet();
+  await initComparisonSheet();
   startHealthServer();
   startSelfPing();
   await Promise.all([startRestPolling(), startBinance()]); // дожидаемся первых данных по всем биржам...
