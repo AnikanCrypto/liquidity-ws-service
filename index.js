@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { buildLayout, buildStaticRequests, buildValueUpdates } = require('./lib/layout');
-const { buildComparisonData } = require('./lib/comparison');
+const { buildComparisonData, REFERENCE_3, ALL_OTHER_10 } = require('./lib/comparison');
 const {
   buildLayout: buildComparisonLayout,
   buildStaticRequests: buildComparisonStaticRequests,
@@ -18,7 +18,8 @@ const {
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = process.env.SHEET_NAME || 'LiquidityTop';
-const COMPARISON_SHEET_NAME = process.env.COMPARISON_SHEET_NAME || 'Сравнение';
+const TABLE1_SHEET_NAME = process.env.TABLE1_SHEET_NAME || 'Сравнение-3-биржи';
+const TABLE2_SHEET_NAME = process.env.TABLE2_SHEET_NAME || 'Сравнение-10-бирж';
 const REST_POLL_MS = Number(process.env.REST_POLL_MS || 15000);   // WhiteBIT/Bybit/OKX
 const SHEET_WRITE_MS = Number(process.env.SHEET_WRITE_MS || 30000); // как часто пишем в таблицу
 const PORT = process.env.PORT || 3000;
@@ -152,8 +153,18 @@ function startBinance() {
 
 let sheets;
 let layout;
-let comparisonSheetId;
-let comparisonLayout;
+let table1SheetId, table1Layout;
+let table2SheetId, table2Layout;
+
+const TABLE1_HEADER = ['#', 'Монета', 'Binance', 'Bybit', 'OKX', 'Бирж', 'Ø ранг', 'Ранг WhiteBIT', 'Рекомендация'];
+const TABLE2_HEADER = ['#', 'Монета', '', '', '', 'Бирж (из 10)', 'Ø ранг', 'Ранг WhiteBIT', 'Рекомендация'];
+
+function table1RowBuilder(r) {
+  return [r.position, r.coin, r.ranks.Binance || '', r.ranks.Bybit || '', r.ranks.OKX || '', r.count, Math.round(r.avgRank * 10) / 10, r.whiteBitRank || 'нет', r.recommendation];
+}
+function table2RowBuilder(r) {
+  return [r.position, r.coin, '', '', '', r.count, Math.round(r.avgRank * 10) / 10, r.whiteBitRank || 'нет', r.recommendation];
+}
 
 async function initSheet() {
   sheets = createSheetsClient();
@@ -174,17 +185,25 @@ async function initSheet() {
   return sheetId;
 }
 
-async function initComparisonSheet() {
-  comparisonLayout = buildComparisonLayout();
-  comparisonSheetId = await getOrCreateSheetId(sheets, SPREADSHEET_ID, COMPARISON_SHEET_NAME);
-
-  await clearSheetFormatting(sheets, SPREADSHEET_ID, comparisonSheetId);
-
+async function initComparisonSheets() {
+  table1Layout = buildComparisonLayout();
+  table1SheetId = await getOrCreateSheetId(sheets, SPREADSHEET_ID, TABLE1_SHEET_NAME);
+  await clearSheetFormatting(sheets, SPREADSHEET_ID, table1SheetId);
   try {
-    const staticRequests = buildComparisonStaticRequests(comparisonSheetId, comparisonLayout);
-    await applyBatchUpdate(sheets, SPREADSHEET_ID, staticRequests);
+    const requests = buildComparisonStaticRequests(table1SheetId, table1Layout, `Консенсус: ${REFERENCE_3.join(' + ')} vs WhiteBIT`, TABLE1_HEADER);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, requests);
   } catch (err) {
-    console.warn('[Sheets] comparison sheet static layout had issues (probably fine on redeploy):', err.message);
+    console.warn('[Sheets] table1 static layout had issues (probably fine on redeploy):', err.message);
+  }
+
+  table2Layout = buildComparisonLayout();
+  table2SheetId = await getOrCreateSheetId(sheets, SPREADSHEET_ID, TABLE2_SHEET_NAME);
+  await clearSheetFormatting(sheets, SPREADSHEET_ID, table2SheetId);
+  try {
+    const requests = buildComparisonStaticRequests(table2SheetId, table2Layout, `Консенсус по ${ALL_OTHER_10.length} биржам vs WhiteBIT (рекомендации по листингу)`, TABLE2_HEADER);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, requests);
+  } catch (err) {
+    console.warn('[Sheets] table2 static layout had issues (probably fine on redeploy):', err.message);
   }
 }
 
@@ -201,10 +220,17 @@ async function pushToSheet() {
   try {
     const tzLabel = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Kyiv' });
     const comparisonData = buildComparisonData(state);
-    const compValues = buildComparisonValueUpdates(COMPARISON_SHEET_NAME, comparisonLayout, comparisonData, 'Обновлено: ' + tzLabel);
-    await applyValueUpdates(sheets, SPREADSHEET_ID, compValues);
-    const recColorRequests = buildRecommendationColorRequests(comparisonSheetId, comparisonLayout, comparisonData);
-    await applyBatchUpdate(sheets, SPREADSHEET_ID, recColorRequests);
+
+    const t1Values = buildComparisonValueUpdates(TABLE1_SHEET_NAME, table1Layout, comparisonData.table1, 'Обновлено: ' + tzLabel, table1RowBuilder);
+    await applyValueUpdates(sheets, SPREADSHEET_ID, t1Values);
+    const t1Colors = buildRecommendationColorRequests(table1SheetId, table1Layout, comparisonData.table1);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, t1Colors);
+
+    const t2Values = buildComparisonValueUpdates(TABLE2_SHEET_NAME, table2Layout, comparisonData.table2, 'Обновлено: ' + tzLabel, table2RowBuilder);
+    await applyValueUpdates(sheets, SPREADSHEET_ID, t2Values);
+    const t2Colors = buildRecommendationColorRequests(table2SheetId, table2Layout, comparisonData.table2);
+    await applyBatchUpdate(sheets, SPREADSHEET_ID, t2Colors);
+
     console.log('[Sheets] comparison pushed at', tzLabel);
   } catch (err) {
     console.error('[Sheets] comparison push failed:', err.message);
@@ -243,7 +269,7 @@ function startSelfPing() {
 
 (async () => {
   await initSheet();
-  await initComparisonSheet();
+  await initComparisonSheets();
   startHealthServer();
   startSelfPing();
   await Promise.all([startRestPolling(), startBinance()]); // дожидаемся первых данных по всем биржам...
