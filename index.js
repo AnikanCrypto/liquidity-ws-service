@@ -7,7 +7,7 @@ const {
   buildLayout: buildComparisonLayout,
   buildStaticRequests: buildComparisonStaticRequests,
   buildValueUpdates: buildComparisonValueUpdates,
-  buildRecommendationColorRequests,
+  buildStatusColorRequests,
 } = require('./lib/comparisonSheet');
 const { createSheetsClient, getOrCreateSheetId, clearSheetFormatting, applyBatchUpdate, applyValueUpdates } = require('./lib/sheetsClient');
 const {
@@ -156,14 +156,24 @@ let layout;
 let table1SheetId, table1Layout;
 let table2SheetId, table2Layout;
 
-const TABLE1_HEADER = ['#', 'Монета', 'Binance', 'Bybit', 'OKX', 'Бирж', 'Ø ранг', 'Ранг WhiteBIT', 'Рекомендация'];
-const TABLE2_HEADER = ['#', 'Монета', '', '', '', 'Бирж (из 10)', 'Ø ранг', 'Ранг WhiteBIT', 'Рекомендация'];
+const TABLE1_HEADER = ['#', 'Монета', 'Binance', 'Bybit', 'OKX', 'Бирж', 'Ø ранг', 'Ранг WhiteBIT', 'Статус'];
+const TABLE2_HEADER = ['#', 'Монета', '', '', '', 'Бирж (из 10)', 'Ø ранг', 'Ранг WhiteBIT', 'Статус'];
+
+function fmtAvg(r) {
+  return r.avgRank != null && Number.isFinite(r.avgRank) ? Math.round(r.avgRank * 10) / 10 : '';
+}
+function fmtTarget(r) {
+  return r.targetRank != null ? r.targetRank : '';
+}
+function fmtActual(r) {
+  return r.actualRank != null ? r.actualRank : 'нет';
+}
 
 function table1RowBuilder(r) {
-  return [r.position, r.coin, r.ranks.Binance || '', r.ranks.Bybit || '', r.ranks.OKX || '', r.count, Math.round(r.avgRank * 10) / 10, r.whiteBitRank || 'нет', r.recommendation];
+  return [fmtTarget(r), r.coin, (r.ranks && r.ranks.Binance) || '', (r.ranks && r.ranks.Bybit) || '', (r.ranks && r.ranks.OKX) || '', r.count || '', fmtAvg(r), fmtActual(r), r.status];
 }
 function table2RowBuilder(r) {
-  return [r.position, r.coin, '', '', '', r.count, Math.round(r.avgRank * 10) / 10, r.whiteBitRank || 'нет', r.recommendation];
+  return [fmtTarget(r), r.coin, '', '', '', r.count || '', fmtAvg(r), fmtActual(r), r.status];
 }
 
 async function initSheet() {
@@ -223,12 +233,12 @@ async function pushToSheet() {
 
     const t1Values = buildComparisonValueUpdates(TABLE1_SHEET_NAME, table1Layout, comparisonData.table1, 'Обновлено: ' + tzLabel, table1RowBuilder);
     await applyValueUpdates(sheets, SPREADSHEET_ID, t1Values);
-    const t1Colors = buildRecommendationColorRequests(table1SheetId, table1Layout, comparisonData.table1);
+    const t1Colors = buildStatusColorRequests(table1SheetId, table1Layout, comparisonData.table1);
     await applyBatchUpdate(sheets, SPREADSHEET_ID, t1Colors);
 
     const t2Values = buildComparisonValueUpdates(TABLE2_SHEET_NAME, table2Layout, comparisonData.table2, 'Обновлено: ' + tzLabel, table2RowBuilder);
     await applyValueUpdates(sheets, SPREADSHEET_ID, t2Values);
-    const t2Colors = buildRecommendationColorRequests(table2SheetId, table2Layout, comparisonData.table2);
+    const t2Colors = buildStatusColorRequests(table2SheetId, table2Layout, comparisonData.table2);
     await applyBatchUpdate(sheets, SPREADSHEET_ID, t2Colors);
 
     console.log('[Sheets] comparison pushed at', tzLabel);
