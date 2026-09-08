@@ -13,7 +13,7 @@ const { createSheetsClient, getOrCreateSheetId, clearSheetFormatting, applyBatch
 const {
   fetchWhiteBit, fetchBybit, fetchOkx,
   fetchBitget, fetchKuCoin, fetchMexc, fetchGate, fetchKraken, fetchHtx, fetchBitfinex,
-  startBinanceTopWs,
+  fetchBinanceTradeFi, startBinanceTopWs,
 } = require('./lib/exchanges');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -33,9 +33,9 @@ if (!SPREADSHEET_ID) {
 
 const state = {
   WhiteBIT: { Spot: [], Futures: [], TradeFi: [] },
-  Binance: { Spot: [], Futures: [] },
-  Bybit: { Spot: [], Futures: [] },
-  OKX: { Spot: [], Futures: [] },
+  Binance: { Spot: [], Futures: [], TradeFi: [] },
+  Bybit: { Spot: [], Futures: [], TradeFi: [] },
+  OKX: { Spot: [], Futures: [], TradeFi: [] },
   Bitget: { Spot: [], Futures: [] },
   KuCoin: { Spot: [], Futures: [] },
   MEXC: { Spot: [], Futures: [] },
@@ -90,10 +90,12 @@ async function pollBybit() {
     const r = await fetchBybit();
     setBlock('Bybit', 'Spot', r.Spot);
     setBlock('Bybit', 'Futures', r.Futures);
+    setBlock('Bybit', 'TradeFi', r.TradeFi);
   } catch (err) {
     console.warn('[Bybit] poll failed:', err.message);
     setBlockError('Bybit', 'Spot', err.message);
     setBlockError('Bybit', 'Futures', err.message);
+    setBlockError('Bybit', 'TradeFi', err.message);
   }
 }
 
@@ -102,10 +104,22 @@ async function pollOkx() {
     const r = await fetchOkx();
     setBlock('OKX', 'Spot', r.Spot);
     setBlock('OKX', 'Futures', r.Futures);
+    setBlock('OKX', 'TradeFi', r.TradeFi);
   } catch (err) {
     console.warn('[OKX] poll failed:', err.message);
     setBlockError('OKX', 'Spot', err.message);
     setBlockError('OKX', 'Futures', err.message);
+    setBlockError('OKX', 'TradeFi', err.message);
+  }
+}
+
+async function pollBinanceTradeFi() {
+  try {
+    const r = await fetchBinanceTradeFi();
+    setBlock('Binance', 'TradeFi', r.TradeFi);
+  } catch (err) {
+    console.warn('[Binance TradeFi] poll failed:', err.message);
+    setBlockError('Binance', 'TradeFi', err.message);
   }
 }
 
@@ -133,7 +147,7 @@ const pollHtx = makeSimplePoller('HTX', fetchHtx);
 const pollBitfinex = makeSimplePoller('Bitfinex', fetchBitfinex);
 
 function startRestPolling() {
-  const pollers = [pollWhiteBit, pollBybit, pollOkx, pollBitget, pollKuCoin, pollMexc, pollGate, pollKraken, pollHtx, pollBitfinex];
+  const pollers = [pollWhiteBit, pollBybit, pollOkx, pollBinanceTradeFi, pollBitget, pollKuCoin, pollMexc, pollGate, pollKraken, pollHtx, pollBitfinex];
   const tick = () => pollers.forEach(fn => fn());
   const firstTick = Promise.allSettled(pollers.map(fn => fn()));
   setInterval(tick, REST_POLL_MS);
